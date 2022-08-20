@@ -1,5 +1,5 @@
 //! Wave Function Collapse
-//! 
+//!
 //! Provides an implementation of the wave function collapse algorithm.
 //!
 //! Wave function collapse works by iteratively "collapsing" a collecion of
@@ -16,14 +16,18 @@ pub mod bitset_state;
 pub mod hashset_state;
 pub mod set_rule;
 
-use std::{collections::{HashSet, VecDeque}};
+use std::collections::VecDeque;
 
-use rand::{thread_rng, Rng};
 pub use space::*;
 pub use state::*;
 pub use collapse_rule::*;
 pub use set_state::*;
 pub use all_state::*;
+
+#[cfg(not(feature = "deterministic"))]
+type HashSet<T> = std::collections::HashSet<T>;
+#[cfg(feature = "deterministic")]
+type HashSet<T> = indexmap::IndexSet<T>;
 
 fn find_next_to_collapse<St: State, Sp: Space<St>>(unresoved_set: &mut HashSet<Sp::Coordinate>, lowest_entropy_set: &mut Vec<Sp::Coordinate>, resolved_set: &mut HashSet<Sp::Coordinate>, space: &Sp) -> Option<Sp::Coordinate> {
 	let mut lowest_entropy = std::u32::MAX;
@@ -45,7 +49,15 @@ fn find_next_to_collapse<St: State, Sp: Space<St>>(unresoved_set: &mut HashSet<S
 	if lowest_entropy_set.len() == 0 {
 		return None;
 	} else {
-		Some(lowest_entropy_set[thread_rng().gen_range(0..lowest_entropy_set.len())])
+		#[cfg(not(feature = "deterministic"))]
+		{
+			use rand::{thread_rng, Rng};
+			Some(lowest_entropy_set[thread_rng().gen_range(0..lowest_entropy_set.len())])
+		}
+		#[cfg(feature = "deterministic")]
+		{
+			Some(lowest_entropy_set[0])
+		}
 	}
 }
 
@@ -64,12 +76,12 @@ pub fn collapse<Rule: CollapseRule<St, Sp>, St: State, Sp: Space<St>>(space: &mu
 	let mut neighbors = vec![None; neighbor_directions.len()].into_boxed_slice();
 	let mut neighbor_states = vec![Option::<St>::None; neighbor_directions.len()].into_boxed_slice();
 	let mut to_propogate = VecDeque::new();
-	
+
 	for coordinate in unresolved_set.iter() {
 		to_propogate.push_back(*coordinate);
 	}
 	run_propogation(space, rule, &mut to_propogate, &neighbor_directions, &mut neighbors, &mut neighbor_states);
-	
+
 	while let Some(to_collapse) = find_next_to_collapse(&mut unresolved_set, &mut lowest_entropy_set, &mut resolved_set, space) {
 		to_propogate.clear();
 		space.neighbors(to_collapse, &neighbor_directions, &mut neighbors);
@@ -89,7 +101,7 @@ pub fn collapse<Rule: CollapseRule<St, Sp>, St: State, Sp: Space<St>>(space: &mu
 fn run_propogation<Rule: CollapseRule<St, Sp>, St: State, Sp: Space<St>>(space: &mut Sp, rule: &Rule, to_propogate: &mut VecDeque<Sp::Coordinate>, neighbor_directions: &[Sp::CoordinateDelta], neighbors: &mut [Option<Sp::Coordinate>], neighbor_states: &mut [Option<St>]) {
 	while let Some(propogating) = to_propogate.pop_front() {
 		let entropy_before = space[propogating].entropy();
-		
+
 		if entropy_before != 0 {
 			space.neighbors(propogating, &neighbor_directions, neighbors);
 			for i in 0 .. neighbor_directions.len() {
@@ -97,7 +109,7 @@ fn run_propogation<Rule: CollapseRule<St, Sp>, St: State, Sp: Space<St>>(space: 
 			}
 			rule.collapse(&mut space[propogating], &neighbor_states[..]);
 			let entropy_after = space[propogating].entropy();
-			
+
 			if entropy_after < entropy_before {
 				for i in 0 .. neighbor_directions.len() {
 					if let Some(neighbor) = neighbors[i] {
